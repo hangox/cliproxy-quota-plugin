@@ -1,0 +1,11 @@
+# Binaries & Shared Libraries
+*.so
+*.dylib
+*.dll
+*.h
+
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
