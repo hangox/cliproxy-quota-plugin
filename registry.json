@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "plugins": [
+    {
+      "id": "cliproxy-quota-plugin",
+      "name": "CLIProxy Quota Plugin",
+      "description": "Multi-account weighted quota pooling and live 5h/7d monitoring plugin for Antigravity and Codex.",
+      "author": "hangox",
+      "version": "0.1.0",
+      "repository": "https://github.com/hangox/cliproxy-quota-plugin",
+      "homepage": "https://github.com/hangox/cliproxy-quota-plugin",
+      "license": "MIT",
+      "tags": [
+        "Management",
+        "Quota",
+        "Antigravity",
+        "Codex"
+      ]
+    }
+  ]
+}
