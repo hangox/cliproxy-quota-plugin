@@ -127,3 +127,73 @@ func TestPluginHandleManagement(t *testing.T) {
 		t.Errorf("StatusCode = %d, want 404", resp3.StatusCode)
 	}
 }
+
+type dummyProxyStrategy struct {
+	proxyURL string
+}
+
+func (d *dummyProxyStrategy) Provider() string {
+	return "dummy"
+}
+
+func (d *dummyProxyStrategy) FetchAccountQuota(_ context.Context, _ *quota.AuthAccount) (quota.AccountQuotaData, error) {
+	return quota.AccountQuotaData{}, nil
+}
+
+func (d *dummyProxyStrategy) SetDefaultProxyURL(u string) {
+	d.proxyURL = u
+}
+
+func TestPluginConfigureAndParseProxyURL(t *testing.T) {
+	// 1. 验证各种输入格式解析
+	tests := []struct {
+		name  string
+		raw   string
+		want  string
+	}{
+		{
+			name: "rpcLifecycleRequest yaml bytes",
+			raw:  `{"config_yaml":"cHJveHlfdXJsOiBodHRwOi8vMTI3LjAuMC4xOjc4OTAK"}` , // base64 of "proxy_url: http://127.0.0.1:7890\n"
+			want: "http://127.0.0.1:7890",
+		},
+		{
+			name: "direct JSON object",
+			raw:  `{"proxy_url": "http://127.0.0.1:8888"}`,
+			want: "http://127.0.0.1:8888",
+		},
+		{
+			name: "raw yaml",
+			raw:  "proxy_url: http://127.0.0.1:9999\n",
+			want: "http://127.0.0.1:9999",
+		},
+		{
+			name: "empty config",
+			raw:  `{}`,
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseProxyURLFromConfig([]byte(tt.raw))
+			if got != tt.want {
+				t.Errorf("ParseProxyURLFromConfig() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+
+	// 2. 验证 Plugin.Configure 动态同步更新至引擎策略
+	engine := quota.NewQuotaEngine(&dummyAccountLister{})
+	strat := &dummyProxyStrategy{}
+	engine.Register(strat)
+	p := NewPlugin(engine)
+
+	reqRaw := []byte(`{"proxy_url": "http://10.0.0.1:1080"}`)
+	if err := p.Configure(reqRaw); err != nil {
+		t.Fatalf("Configure failed: %v", err)
+	}
+	if strat.proxyURL != "http://10.0.0.1:1080" {
+		t.Errorf("strat.proxyURL = %q, want http://10.0.0.1:1080", strat.proxyURL)
+	}
+}
+

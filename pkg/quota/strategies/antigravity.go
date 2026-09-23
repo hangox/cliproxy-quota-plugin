@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hangox/cliproxy-quota-plugin/pkg/quota"
@@ -45,9 +46,11 @@ var defaultAntigravityEndpoints = []string{
 
 // AntigravityStrategy 实现 Google Antigravity 配额策略。
 type AntigravityStrategy struct {
-	httpClient *http.Client
-	endpoints  []string
-	userAgent  string
+	httpClient      *http.Client
+	endpoints       []string
+	userAgent       string
+	defaultProxyURL string
+	proxyClients    sync.Map // 缓存代理客户端，防止频繁创建 Transport 导致连接池泄漏
 }
 
 // NewAntigravityStrategy 创建 Antigravity 配额策略。
@@ -65,10 +68,61 @@ func NewAntigravityStrategy(client *http.Client, endpoints ...string) *Antigravi
 		ep = endpoints
 	}
 	return &AntigravityStrategy{
-		httpClient: client,
-		endpoints:  ep,
-		userAgent:  antigravityQuotaSummaryUserAgent,
+		httpClient:      client,
+		endpoints:       ep,
+		userAgent:       antigravityQuotaSummaryUserAgent,
+		defaultProxyURL: DefaultEnvProxyURL(),
 	}
+}
+
+// SetDefaultProxyURL 设置默认代理地址，若传空则回退检查环境变量。
+func (s *AntigravityStrategy) SetDefaultProxyURL(proxyURL string) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		proxyURL = DefaultEnvProxyURL()
+	}
+	s.defaultProxyURL = proxyURL
+}
+
+func (s *AntigravityStrategy) getHTTPClient(account *quota.AuthAccount) (*http.Client, error) {
+	proxyURL := ""
+	if account != nil {
+		if account.Attributes != nil {
+			if v := strings.TrimSpace(account.Attributes["proxy_url"]); v != "" {
+				proxyURL = v
+			} else if v := strings.TrimSpace(account.Attributes["proxy"]); v != "" {
+				proxyURL = v
+			}
+		}
+		if proxyURL == "" && account.Metadata != nil {
+			if v, ok := account.Metadata["proxy_url"].(string); ok && strings.TrimSpace(v) != "" {
+				proxyURL = strings.TrimSpace(v)
+			} else if v, ok := account.Metadata["proxy"].(string); ok && strings.TrimSpace(v) != "" {
+				proxyURL = strings.TrimSpace(v)
+			}
+		}
+	}
+	if proxyURL == "" {
+		proxyURL = s.defaultProxyURL
+	}
+	if proxyURL == "" {
+		return s.httpClient, nil
+	}
+	if v, ok := s.proxyClients.Load(proxyURL); ok {
+		return v.(*http.Client), nil
+	}
+	parsedURL, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid proxy URL %q: %w", proxyURL, err)
+	}
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(parsedURL),
+		},
+		Timeout: 10 * time.Second,
+	}
+	actual, _ := s.proxyClients.LoadOrStore(proxyURL, client)
+	return actual.(*http.Client), nil
 }
 
 // SetEndpoints 设置请求地址（用于测试或定制）。
@@ -124,7 +178,12 @@ func (s *AntigravityStrategy) FetchAccountQuota(ctx context.Context, account *qu
 		Groups: make(map[string][]quota.RawBucket),
 	}
 
-	accessToken, projectID := s.extractCredentials(ctx, account)
+	client, errClient := s.getHTTPClient(account)
+	if errClient != nil {
+		return data, errClient
+	}
+
+	accessToken, projectID := s.extractCredentials(ctx, account, client)
 	if accessToken == "" {
 		return data, fmt.Errorf("antigravity auth %q missing access token", account.ID)
 	}
@@ -150,7 +209,7 @@ func (s *AntigravityStrategy) FetchAccountQuota(ctx context.Context, account *qu
 		req.Header.Set("Accept", "application/json")
 		req.Header.Set("User-Agent", s.userAgent)
 
-		resp, errDo := s.httpClient.Do(req)
+		resp, errDo := client.Do(req)
 		if errDo != nil {
 			lastErr = errDo
 			continue
@@ -203,7 +262,7 @@ func (s *AntigravityStrategy) FetchAccountQuota(ctx context.Context, account *qu
 	return data, lastErr
 }
 
-func (s *AntigravityStrategy) extractCredentials(ctx context.Context, account *quota.AuthAccount) (string, string) {
+func (s *AntigravityStrategy) extractCredentials(ctx context.Context, account *quota.AuthAccount, client *http.Client) (string, string) {
 	var accessToken, refreshToken, projectID string
 
 	// 1. 读取 attributes
@@ -244,7 +303,7 @@ func (s *AntigravityStrategy) extractCredentials(ctx context.Context, account *q
 
 	// 如果没有 access_token 但有 refresh_token，尝试刷新
 	if accessToken == "" && refreshToken != "" {
-		refreshedToken, errRefresh := s.refreshToken(ctx, refreshToken)
+		refreshedToken, errRefresh := s.refreshToken(ctx, refreshToken, client)
 		if errRefresh == nil && refreshedToken != "" {
 			accessToken = refreshedToken
 		}
@@ -253,7 +312,11 @@ func (s *AntigravityStrategy) extractCredentials(ctx context.Context, account *q
 	return accessToken, projectID
 }
 
-func (s *AntigravityStrategy) refreshToken(ctx context.Context, refreshToken string) (string, error) {
+func (s *AntigravityStrategy) refreshToken(ctx context.Context, refreshToken string, client *http.Client) (string, error) {
+	if client == nil {
+		client = s.httpClient
+	}
+
 	form := url.Values{}
 	form.Set("client_id", defaultAntigravityClientID())
 	form.Set("client_secret", defaultAntigravityClientSecret())
@@ -267,7 +330,7 @@ func (s *AntigravityStrategy) refreshToken(ctx context.Context, refreshToken str
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "Go-http-client/2.0")
 
-	resp, err := s.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

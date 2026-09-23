@@ -152,8 +152,14 @@ func getPlugin() *plugin.Plugin {
 
 	hostAuthMgr := quota.NewHostAuthManager(&cHostCaller{})
 	engine := quota.NewQuotaEngine(hostAuthMgr)
-	engine.Register(strategies.NewAntigravityStrategy(nil))
-	engine.Register(strategies.NewCodexStrategy(nil))
+	agStrat := strategies.NewAntigravityStrategy(nil)
+	codexStrat := strategies.NewCodexStrategy(nil)
+	if defaultProxy := strategies.DefaultEnvProxyURL(); defaultProxy != "" {
+		agStrat.SetDefaultProxyURL(defaultProxy)
+		codexStrat.SetDefaultProxyURL(defaultProxy)
+	}
+	engine.Register(agStrat)
+	engine.Register(codexStrat)
 	pluginInstance = plugin.NewPlugin(engine)
 	return pluginInstance
 }
@@ -211,6 +217,9 @@ func handleMethod(method string, request []byte) ([]byte, error) {
 	p := getPlugin()
 	switch method {
 	case pluginabi.MethodPluginRegister, pluginabi.MethodPluginReconfigure:
+		if errConfigure := p.Configure(request); errConfigure != nil {
+			return nil, errConfigure
+		}
 		return okEnvelope(p.Register())
 	case pluginabi.MethodManagementRegister:
 		return okEnvelope(p.ManagementRegister())

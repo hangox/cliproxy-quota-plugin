@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"github.com/hangox/cliproxy-quota-plugin/pkg/quota"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginabi"
 	"github.com/router-for-me/CLIProxyAPI/v7/sdk/pluginapi"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -85,6 +87,64 @@ func (p *Plugin) SetTimeout(d time.Duration) {
 	}
 }
 
+// Configure 从宿主生命周期请求中解析配置并应用（如 proxy_url 动态配置）。
+func (p *Plugin) Configure(raw []byte) error {
+	if proxyURL := ParseProxyURLFromConfig(raw); proxyURL != "" {
+		p.engine.SetDefaultProxyURL(proxyURL)
+	}
+	return nil
+}
+
+// ParseProxyURLFromConfig 从插件注册/重载请求数据中解析 proxy_url。
+func ParseProxyURLFromConfig(raw []byte) string {
+	if len(raw) == 0 {
+		return ""
+	}
+
+	// 1. 尝试解析 JSON 包装（如 {"config_yaml": "...", "schema_version": 1} 或 {"proxy_url": "..."}）
+	var rawMap map[string]any
+	if err := json.Unmarshal(raw, &rawMap); err == nil && rawMap != nil {
+		if cy, ok := rawMap["config_yaml"]; ok {
+			switch v := cy.(type) {
+			case string:
+				if b64, errB64 := base64.StdEncoding.DecodeString(v); errB64 == nil && len(b64) > 0 {
+					if p := extractProxyFromYAML(b64); p != "" {
+						return p
+					}
+				}
+				if p := extractProxyFromYAML([]byte(v)); p != "" {
+					return p
+				}
+			}
+		}
+		if p, ok := rawMap["proxy_url"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+		if p, ok := rawMap["proxy"].(string); ok && strings.TrimSpace(p) != "" {
+			return strings.TrimSpace(p)
+		}
+	}
+
+	// 2. 尝试作为裸 YAML 解析
+	return extractProxyFromYAML(raw)
+}
+
+func extractProxyFromYAML(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := yaml.Unmarshal(data, &m); err == nil && m != nil {
+		if v, ok := m["proxy_url"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+		if v, ok := m["proxy"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
 // Register 返回插件基础元数据与能力声明。
 func (p *Plugin) Register() Registration {
 	return Registration{
@@ -94,7 +154,11 @@ func (p *Plugin) Register() Registration {
 			Version:          "0.1.0",
 			Author:           "hangox",
 			GitHubRepository: "https://github.com/hangox/cliproxy-quota-plugin",
-			ConfigFields:     []pluginapi.ConfigField{},
+			ConfigFields: []pluginapi.ConfigField{{
+				Name:        "proxy_url",
+				Type:        pluginapi.ConfigFieldTypeString,
+				Description: "Default outbound proxy URL for quota collection (e.g. http://127.0.0.1:7890)",
+			}},
 		},
 		Capabilities: RegistrationCapabilities{
 			ManagementAPI: true,

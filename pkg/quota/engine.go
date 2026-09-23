@@ -52,6 +52,17 @@ func (e *QuotaEngine) ClearCache() {
 	e.cache = make(map[string]cachedQuotaEntry)
 }
 
+// SetDefaultProxyURL 设置并同步所有支持出站代理策略的默认代理地址。
+func (e *QuotaEngine) SetDefaultProxyURL(proxyURL string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	for _, s := range e.strategies {
+		if pc, ok := s.(interface{ SetDefaultProxyURL(string) }); ok {
+			pc.SetDefaultProxyURL(proxyURL)
+		}
+	}
+}
+
 // Register 注册指定 Provider 的配额采集策略。
 func (e *QuotaEngine) Register(strategy ProviderStrategy) {
 	if strategy == nil {

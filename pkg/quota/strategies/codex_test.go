@@ -124,5 +124,14 @@ func TestCodexStrategyProxyCaching(t *testing.T) {
 	if emptyClient != strat.httpClient {
 		t.Errorf("expected default httpClient for empty proxy")
 	}
+
+	strat.SetDefaultProxyURL("http://127.0.0.1:8081")
+	defClient, errDef := strat.getHTTPClient("")
+	if errDef != nil {
+		t.Fatalf("getHTTPClient default error: %v", errDef)
+	}
+	if defClient == strat.httpClient {
+		t.Errorf("expected custom client when default proxy is set")
+	}
 }
 

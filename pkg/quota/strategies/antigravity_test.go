@@ -134,3 +134,49 @@ func TestAntigravityStrategyMissingToken(t *testing.T) {
 		t.Fatal("expected error for missing token, got nil")
 	}
 }
+
+func TestAntigravityStrategyProxyClientCaching(t *testing.T) {
+	strat := NewAntigravityStrategy(nil)
+	strat.SetDefaultProxyURL("")
+
+	// 1. 无代理时返回默认 httpClient
+	cEmpty, errEmpty := strat.getHTTPClient(nil)
+	if errEmpty != nil {
+		t.Fatalf("getHTTPClient empty error: %v", errEmpty)
+	}
+	if cEmpty != strat.httpClient {
+		t.Errorf("expected default httpClient")
+	}
+
+	// 2. 账号指定 proxy_url 并且被缓存复用
+	acc1 := &quota.AuthAccount{
+		ID:         "ag-proxy-1",
+		Attributes: map[string]string{"proxy_url": "http://127.0.0.1:9090"},
+	}
+	acc2 := &quota.AuthAccount{
+		ID:         "ag-proxy-2",
+		Attributes: map[string]string{"proxy": "http://127.0.0.1:9090"},
+	}
+	c1, err1 := strat.getHTTPClient(acc1)
+	if err1 != nil {
+		t.Fatalf("getHTTPClient 1 error: %v", err1)
+	}
+	c2, err2 := strat.getHTTPClient(acc2)
+	if err2 != nil {
+		t.Fatalf("getHTTPClient 2 error: %v", err2)
+	}
+	if c1 != c2 {
+		t.Errorf("expected cached client to be reused, got %p vs %p", c1, c2)
+	}
+
+	// 3. 全局默认代理兜底
+	strat.SetDefaultProxyURL("http://127.0.0.1:9091")
+	cDef, errDef := strat.getHTTPClient(&quota.AuthAccount{ID: "no-proxy"})
+	if errDef != nil {
+		t.Fatalf("getHTTPClient def error: %v", errDef)
+	}
+	if cDef == strat.httpClient {
+		t.Errorf("expected custom client from default proxy")
+	}
+}
+

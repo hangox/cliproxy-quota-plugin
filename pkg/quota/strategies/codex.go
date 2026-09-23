@@ -29,6 +29,9 @@ func NewCodexStrategy(client *http.Client, defaultProxyURL ...string) *CodexStra
 	if len(defaultProxyURL) > 0 {
 		proxyStr = strings.TrimSpace(defaultProxyURL[0])
 	}
+	if proxyStr == "" {
+		proxyStr = DefaultEnvProxyURL()
+	}
 
 	if client == nil {
 		transport := &http.Transport{
@@ -50,6 +53,15 @@ func NewCodexStrategy(client *http.Client, defaultProxyURL ...string) *CodexStra
 		baseURL:         "https://chatgpt.com",
 		defaultProxyURL: proxyStr,
 	}
+}
+
+// SetDefaultProxyURL 设置默认代理地址，若传空则回退检查环境变量。
+func (s *CodexStrategy) SetDefaultProxyURL(proxyURL string) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		proxyURL = DefaultEnvProxyURL()
+	}
+	s.defaultProxyURL = proxyURL
 }
 
 // SetBaseURL 设置请求基地址（用于单元测试 httptest.Server）。
@@ -88,6 +100,9 @@ type codexWindowJSON struct {
 }
 
 func (s *CodexStrategy) getHTTPClient(proxyURL string) (*http.Client, error) {
+	if proxyURL == "" {
+		proxyURL = s.defaultProxyURL
+	}
 	if proxyURL == "" {
 		return s.httpClient, nil
 	}

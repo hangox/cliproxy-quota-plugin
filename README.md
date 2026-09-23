@@ -47,7 +47,9 @@
             ├── antigravity.go
             ├── antigravity_test.go
             ├── codex.go
-            └── codex_test.go
+            ├── codex_test.go
+            ├── proxy.go    # 出站代理环境变量发现与公共工具
+            └── proxy_test.go
 ```
 
 ---
@@ -91,6 +93,18 @@ plugins:
     cliproxy-quota-plugin:
       enabled: true
       priority: 1
+      # 可选：全局默认出站代理（亦支持环境变量 PROXY_URL / HTTPS_PROXY / HTTP_PROXY 自动兜底）
+      proxy_url: "http://127.0.0.1:7890"
+```
+
+同时支持在单个账号凭据文件（或运行时元数据）中指定账号级独立代理，优先级高于全局代理：
+```json
+{
+  "type": "antigravity",
+  "email": "user@example.com",
+  "proxy_url": "http://127.0.0.1:9090",
+  "weight": 2
+}
 ```
 
 启动 CLIProxyAPI 宿主后，访问端点：
