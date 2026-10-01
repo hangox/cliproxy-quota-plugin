@@ -283,6 +283,36 @@ func TestQuotaEngineErrorDegradation(t *testing.T) {
 	}
 }
 
+func TestQuotaEngineMonthlyBucket(t *testing.T) {
+	monthlyReset := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	strategy := &mockStrategy{
+		provider: "kimi",
+		quotaMap: map[string]AccountQuotaData{
+			"kimi-1": {
+				AuthID: "kimi-1",
+				Buckets: []RawBucket{
+					{Kind: "5h", RemainingPercent: 75},
+					{Kind: "monthly", RemainingPercent: 99.89, ResetAt: monthlyReset},
+				},
+			},
+		},
+	}
+	engine := NewQuotaEngine(&mockAccountLister{accounts: []*AuthAccount{{ID: "kimi-1", Provider: "kimi", Status: "active", Weight: 1}}})
+	engine.Register(strategy)
+
+	result, err := engine.CollectProvider(context.Background(), "kimi")
+	if err != nil {
+		t.Fatalf("CollectProvider failed: %v", err)
+	}
+	if len(result.Windows) != 2 || result.Windows[0].Name != "5h" || result.Windows[1].Name != "monthly" {
+		t.Fatalf("windows = %+v, want 5h and monthly", result.Windows)
+	}
+	monthly := result.Windows[1]
+	if monthly.RemainingPercentage == nil || *monthly.RemainingPercentage != 99.89 || monthly.ResetsAt == nil || !monthly.ResetsAt.Equal(monthlyReset) {
+		t.Fatalf("monthly window = %+v, want 99.89%% and reset %v", monthly, monthlyReset)
+	}
+}
+
 func TestQuotaEngineCacheHit(t *testing.T) {
 	strategy := &mockStrategy{
 		provider: "cached-prov",

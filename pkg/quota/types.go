@@ -7,7 +7,7 @@ import (
 
 // RawBucket 代表单个时间窗口的原始配额数据。
 type RawBucket struct {
-	Kind             string    `json:"kind"` // "5h" 或 "7d"
+	Kind             string    `json:"kind"` // "5h"、"7d" 或 "monthly"
 	RemainingPercent float64   `json:"remaining_percent"`
 	ResetAt          time.Time `json:"reset_at,omitempty"`
 }

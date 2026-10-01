@@ -117,11 +117,10 @@ func ParseProxyURLFromConfig(raw []byte) string {
 				}
 			}
 		}
-		if p, ok := rawMap["proxy_url"].(string); ok && strings.TrimSpace(p) != "" {
-			return strings.TrimSpace(p)
-		}
-		if p, ok := rawMap["proxy"].(string); ok && strings.TrimSpace(p) != "" {
-			return strings.TrimSpace(p)
+		for _, key := range []string{"proxy_url", "proxy-url", "proxy"} {
+			if p, ok := rawMap[key].(string); ok && strings.TrimSpace(p) != "" {
+				return strings.TrimSpace(p)
+			}
 		}
 	}
 
@@ -135,11 +134,10 @@ func extractProxyFromYAML(data []byte) string {
 	}
 	var m map[string]any
 	if err := yaml.Unmarshal(data, &m); err == nil && m != nil {
-		if v, ok := m["proxy_url"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
-		}
-		if v, ok := m["proxy"].(string); ok && strings.TrimSpace(v) != "" {
-			return strings.TrimSpace(v)
+		for _, key := range []string{"proxy_url", "proxy-url", "proxy"} {
+			if v, ok := m[key].(string); ok && strings.TrimSpace(v) != "" {
+				return strings.TrimSpace(v)
+			}
 		}
 	}
 	return ""

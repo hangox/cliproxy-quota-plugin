@@ -97,20 +97,16 @@ func kimiAccountProxy(account *quota.AuthAccount) string {
 	if account == nil {
 		return ""
 	}
-	if account.Attributes != nil {
-		if value := strings.TrimSpace(account.Attributes["proxy_url"]); value != "" {
-			return value
+	for _, key := range []string{"proxy_url", "proxy-url", "proxy"} {
+		if account.Attributes != nil {
+			if value := strings.TrimSpace(account.Attributes[key]); value != "" {
+				return value
+			}
 		}
-		if value := strings.TrimSpace(account.Attributes["proxy"]); value != "" {
-			return value
-		}
-	}
-	if account.Metadata != nil {
-		if value, ok := account.Metadata["proxy_url"].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-		if value, ok := account.Metadata["proxy"].(string); ok && strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
+		if account.Metadata != nil {
+			if value, ok := account.Metadata[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
 		}
 	}
 	return ""
@@ -139,6 +135,7 @@ func (s *KimiStrategy) FetchAccountQuota(ctx context.Context, account *quota.Aut
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "CLIProxyAPI-Quota-Plugin/0.1.0")
 
 	response, err := client.Do(request)
 	if err != nil {
@@ -261,7 +258,15 @@ func parseKimiUsagePayload(payload map[string]any) []quota.RawBucket {
 	}
 	if fiveHour == nil {
 		for _, candidate := range candidates {
-			if raw, ok := candidate["limit_5h"]; ok {
+			if usages, ok := candidate["usages"].(map[string]any); ok && usages != nil {
+				if l5h, ok := usages["limit_5h"]; ok && l5h != nil {
+					if bucket, ok := kimiFallbackBucket(l5h, usages); ok {
+						fiveHour = &bucket
+						break
+					}
+				}
+			}
+			if raw, ok := candidate["limit_5h"]; ok && raw != nil {
 				if bucket, ok := kimiFallbackBucket(raw, candidate); ok {
 					fiveHour = &bucket
 					break
@@ -298,6 +303,21 @@ func parseKimiUsagePayload(payload map[string]any) []quota.RawBucket {
 }
 
 func isKimiFiveHourLimit(limit map[string]any) bool {
+	if win, ok := limit["window"].(map[string]any); ok && win != nil {
+		d, okDuration := kimiNumber(win["duration"])
+		unit := strings.ToUpper(kimiString(win["timeUnit"]))
+		if okDuration {
+			if strings.Contains(unit, "HOUR") && d == 5 {
+				return true
+			}
+			if (strings.Contains(unit, "MINUTE") || unit == "") && d == 300 {
+				return true
+			}
+			if strings.Contains(unit, "SECOND") && d == 18000 {
+				return true
+			}
+		}
+	}
 	for _, key := range []string{"window_minutes", "duration_minutes", "limit_window_minutes"} {
 		if value, ok := kimiNumber(limit[key]); ok && value == 300 {
 			return true
@@ -326,20 +346,25 @@ func isKimiFiveHourLimit(limit map[string]any) bool {
 }
 
 func kimiLimitBucket(kind string, values map[string]any) (quota.RawBucket, bool) {
-	limit := values["limit"]
-	used, hasUsed := kimiAmountPercent(values["used"], limit)
-	remaining, hasRemaining := kimiAmountPercent(values["remaining"], limit)
+	det, _ := values["detail"].(map[string]any)
+	if det == nil {
+		det = values
+	}
+
+	limit := firstKimiValue(det["limit"], values["limit"])
+	used, hasUsed := kimiAmountPercent(firstKimiValue(det["used"], values["used"]), limit)
+	remaining, hasRemaining := kimiAmountPercent(firstKimiValue(det["remaining"], values["remaining"]), limit)
 	if !hasUsed {
-		used, hasUsed = kimiPercentage(firstKimiValue(values["used_percent"], values["usedPercent"]))
+		used, hasUsed = kimiPercentage(firstKimiValue(det["used_percent"], det["usedPercent"], values["used_percent"], values["usedPercent"]))
 	}
 	if !hasRemaining {
-		remaining, hasRemaining = kimiPercentage(firstKimiValue(values["remaining_percent"], values["remainingPercent"]))
+		remaining, hasRemaining = kimiPercentage(firstKimiValue(det["remaining_percent"], det["remainingPercent"], values["remaining_percent"], values["remainingPercent"]))
 	}
 	if !hasUsed {
-		used, hasUsed = kimiRatioPercent(values["used_ratio"])
+		used, hasUsed = kimiRatioPercent(firstKimiValue(det["used_ratio"], values["used_ratio"]))
 	}
 	if !hasRemaining {
-		remaining, hasRemaining = kimiRatioPercent(values["remaining_ratio"])
+		remaining, hasRemaining = kimiRatioPercent(firstKimiValue(det["remaining_ratio"], values["remaining_ratio"]))
 	}
 	if !hasUsed && hasRemaining {
 		used, hasUsed = clampKimiPercent(100-remaining), true
@@ -347,12 +372,14 @@ func kimiLimitBucket(kind string, values map[string]any) (quota.RawBucket, bool)
 	if !hasRemaining && hasUsed {
 		remaining, hasRemaining = clampKimiPercent(100-used), true
 	}
-	if !hasUsed || !hasRemaining {
+	if !hasRemaining {
 		return quota.RawBucket{}, false
 	}
+	resetTime := kimiResetTime(firstKimiValue(det["resetTime"], det["reset_time"], values["resetTime"], values["reset_time"], values["reset_at"]))
 	return quota.RawBucket{
-		Kind: kind, RemainingPercent: remaining,
-		ResetAt: kimiResetTime(firstKimiValue(values["resetTime"], values["reset_time"], values["reset_at"])),
+		Kind:             kind,
+		RemainingPercent: remaining,
+		ResetAt:          resetTime,
 	}, true
 }
 

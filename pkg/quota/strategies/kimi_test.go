@@ -170,6 +170,65 @@ func TestKimiStrategyErrors(t *testing.T) {
 	})
 }
 
+func TestKimiStrategyRealLivePayload(t *testing.T) {
+	clearStrategyProxyEnvironment(t)
+	liveJSON := `{
+		"limits": [{
+			"window": {
+				"duration": 300,
+				"timeUnit": "TIME_UNIT_MINUTE"
+			},
+			"detail": {
+				"limit": "100",
+				"used": "9",
+				"remaining": "91",
+				"resetTime": "2026-10-01T20:50:19.710836Z"
+			}
+		}],
+		"usages": {
+			"limit_5h": {
+				"used_ratio": 0.092041,
+				"reset_time": "2026-10-01T20:50:18Z"
+			},
+			"limit_month_total": {
+				"used_ratio": 0.0049,
+				"reset_time": "2026-11-01T00:00:00Z"
+			},
+			"limit_month_code": {
+				"used_ratio": 0.0037,
+				"reset_time": "2026-11-01T00:00:00Z"
+			}
+		}
+	}`
+
+	transport := &kimiTestTransport{statusCode: http.StatusOK, body: liveJSON}
+	strategy := NewKimiStrategy(&http.Client{Transport: transport})
+	account := &quota.AuthAccount{
+		ID:         "kimi-live",
+		Provider:   "kimi",
+		Attributes: map[string]string{"access_token": "token-123"},
+	}
+
+	data, err := strategy.FetchAccountQuota(context.Background(), account)
+	if err != nil {
+		t.Fatalf("FetchAccountQuota() error: %v", err)
+	}
+
+	if len(data.Buckets) != 2 {
+		t.Fatalf("expected 2 buckets, got %d: %+v", len(data.Buckets), data.Buckets)
+	}
+
+	fiveHour := data.Buckets[0]
+	if fiveHour.Kind != "5h" || fiveHour.RemainingPercent != 91 {
+		t.Errorf("5h bucket = %+v, want RemainingPercent=91", fiveHour)
+	}
+
+	monthly := data.Buckets[1]
+	if monthly.Kind != "monthly" || monthly.RemainingPercent != 99.51 {
+		t.Errorf("monthly bucket = %+v, want RemainingPercent=99.51", monthly)
+	}
+}
+
 func TestKimiStrategyProxySupport(t *testing.T) {
 	clearStrategyProxyEnvironment(t)
 	strategy := NewKimiStrategy(nil)

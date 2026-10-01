@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"log"
 	"math"
 	"strings"
 	"sync"
@@ -138,6 +139,7 @@ func (a *windowAggregate) toWindow(name string) (QuotaWindow, bool) {
 type groupAggregate struct {
 	fiveHour windowAggregate
 	weekly   windowAggregate
+	monthly  windowAggregate
 }
 
 func (g *groupAggregate) add(bucket RawBucket, weight int64) {
@@ -147,6 +149,8 @@ func (g *groupAggregate) add(bucket RawBucket, weight int64) {
 		g.fiveHour.add(bucket.RemainingPercent, weight, bucket.ResetAt)
 	case strings.Contains(kind, "week") || strings.Contains(kind, "7d") || strings.Contains(kind, "7 day"):
 		g.weekly.add(bucket.RemainingPercent, weight, bucket.ResetAt)
+	case strings.Contains(kind, "month"):
+		g.monthly.add(bucket.RemainingPercent, weight, bucket.ResetAt)
 	}
 }
 
@@ -156,6 +160,9 @@ func (g *groupAggregate) toWindows() []QuotaWindow {
 		wins = append(wins, w)
 	}
 	if w, ok := g.weekly.toWindow("7d"); ok {
+		wins = append(wins, w)
+	}
+	if w, ok := g.monthly.toWindow("monthly"); ok {
 		wins = append(wins, w)
 	}
 	return wins
@@ -247,6 +254,7 @@ func (e *QuotaEngine) CollectProvider(ctx context.Context, provider string) (Pro
 	for _, r := range fetchResults {
 		if r.err != nil {
 			// 单账号采集失败优雅降级，不阻断全盘池化
+			log.Printf("[quota-engine] %s account %q quota fetch failed: %v", r.account.Provider, r.account.ID, r.err)
 			continue
 		}
 
