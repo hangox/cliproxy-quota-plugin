@@ -154,12 +154,15 @@ func getPlugin() *plugin.Plugin {
 	engine := quota.NewQuotaEngine(hostAuthMgr)
 	agStrat := strategies.NewAntigravityStrategy(nil)
 	codexStrat := strategies.NewCodexStrategy(nil)
+	kimiStrat := strategies.NewKimiStrategy(nil)
 	if defaultProxy := strategies.DefaultEnvProxyURL(); defaultProxy != "" {
 		agStrat.SetDefaultProxyURL(defaultProxy)
 		codexStrat.SetDefaultProxyURL(defaultProxy)
+		kimiStrat.SetDefaultProxyURL(defaultProxy)
 	}
 	engine.Register(agStrat)
 	engine.Register(codexStrat)
+	engine.Register(kimiStrat)
 	pluginInstance = plugin.NewPlugin(engine)
 	return pluginInstance
 }

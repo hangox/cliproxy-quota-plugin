@@ -136,6 +136,7 @@ func TestAntigravityStrategyMissingToken(t *testing.T) {
 }
 
 func TestAntigravityStrategyProxyClientCaching(t *testing.T) {
+	clearStrategyProxyEnvironment(t)
 	strat := NewAntigravityStrategy(nil)
 	strat.SetDefaultProxyURL("")
 
@@ -179,4 +180,3 @@ func TestAntigravityStrategyProxyClientCaching(t *testing.T) {
 		t.Errorf("expected custom client from default proxy")
 	}
 }
-

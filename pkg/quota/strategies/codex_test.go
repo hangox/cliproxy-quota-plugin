@@ -104,6 +104,7 @@ func TestCodexStrategyMissingToken(t *testing.T) {
 }
 
 func TestCodexStrategyProxyCaching(t *testing.T) {
+	clearStrategyProxyEnvironment(t)
 	strat := NewCodexStrategy(nil)
 	client1, err1 := strat.getHTTPClient("http://127.0.0.1:8080")
 	if err1 != nil {
@@ -134,4 +135,3 @@ func TestCodexStrategyProxyCaching(t *testing.T) {
 		t.Errorf("expected custom client when default proxy is set")
 	}
 }
-
